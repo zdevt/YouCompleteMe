@@ -15,20 +15,15 @@
 # You should have received a copy of the GNU General Public License
 # along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-from __future__ import print_function
-from __future__ import division
-from __future__ import absolute_import
-# Not installing aliases from python-future; it's unreliable and slow.
-from builtins import *  # noqa
-
-from future.utils import itervalues, iteritems
 from collections import defaultdict
 from ycm import vimsupport
 from ycm.diagnostic_filter import DiagnosticFilter, CompileLevel
+from ycm import text_properties as tp
+import vim
+YCM_VIM_PROPERTY_ID = 1
 
 
-class DiagnosticInterface( object ):
+class DiagnosticInterface:
   def __init__( self, bufnr, user_options ):
     self._bufnr = bufnr
     self._user_options = user_options
@@ -40,11 +35,20 @@ class DiagnosticInterface( object ):
     self._diag_message_needs_clearing = False
 
 
+  def ShouldUpdateDiagnosticsUINow( self ):
+    return ( self._user_options[ 'update_diagnostics_in_insert_mode' ] or
+             'i' not in vim.eval( 'mode()' ) )
+
+
   def OnCursorMoved( self ):
     if self._user_options[ 'echo_current_diagnostic' ]:
       line, _ = vimsupport.CurrentLineAndColumn()
       line += 1  # Convert to 1-based
-      if line != self._previous_diag_line_number:
+      if ( not self.ShouldUpdateDiagnosticsUINow() and
+           self._diag_message_needs_clearing ):
+        # Clear any previously echo'd diagnostic in insert mode
+        self._EchoDiagnosticText( line, None, None )
+      elif line != self._previous_diag_line_number:
         self._EchoDiagnosticForLine( line )
 
 
@@ -56,18 +60,23 @@ class DiagnosticInterface( object ):
     return self._DiagnosticsCount( _DiagnosticIsWarning )
 
 
-  def PopulateLocationList( self ):
+  def PopulateLocationList( self, open_on_edit = False ):
     # Do nothing if loc list is already populated by diag_interface
     if not self._user_options[ 'always_populate_location_list' ]:
-      self._UpdateLocationList()
+      self._UpdateLocationLists( open_on_edit )
     return bool( self._diagnostics )
 
 
-  def UpdateWithNewDiagnostics( self, diags ):
+  def UpdateWithNewDiagnostics( self, diags, open_on_edit = False ):
     self._diagnostics = [ _NormalizeDiagnostic( x ) for x in
                             self._ApplyDiagnosticFilter( diags ) ]
     self._ConvertDiagListToDict()
 
+    if self.ShouldUpdateDiagnosticsUINow():
+      self.RefreshDiagnosticsUI( open_on_edit )
+
+
+  def RefreshDiagnosticsUI( self, open_on_edit = False ):
     if self._user_options[ 'echo_current_diagnostic' ]:
       self._EchoDiagnostic()
 
@@ -77,7 +86,21 @@ class DiagnosticInterface( object ):
     self.UpdateMatches()
 
     if self._user_options[ 'always_populate_location_list' ]:
-      self._UpdateLocationList()
+      self._UpdateLocationLists( open_on_edit )
+
+
+  def ClearDiagnosticsUI( self ):
+    if self._user_options[ 'echo_current_diagnostic' ]:
+      self._ClearCurrentDiagnostic()
+
+    if self._user_options[ 'enable_diagnostic_signs' ]:
+      self._ClearSigns()
+
+    self._ClearMatches()
+
+
+  def DiagnosticsForLine( self, line_number ):
+    return self._line_to_diags[ line_number ]
 
 
   def _ApplyDiagnosticFilter( self, diags ):
@@ -96,85 +119,141 @@ class DiagnosticInterface( object ):
     self._previous_diag_line_number = line_num
 
     diags = self._line_to_diags[ line_num ]
-    if not diags:
-      if self._diag_message_needs_clearing:
-        # Clear any previous diag echo
-        vimsupport.PostVimMessage( '', warning = False )
-        self._diag_message_needs_clearing = False
+    text = None
+    first_diag = None
+    if diags:
+      first_diag = diags[ 0 ]
+      text = first_diag[ 'text' ]
+      if first_diag.get( 'fixit_available', False ):
+        text += ' (FixIt)'
+
+    self._EchoDiagnosticText( line_num, first_diag, text )
+
+
+  def _ClearCurrentDiagnostic( self, will_be_replaced=False ):
+    if not self._diag_message_needs_clearing:
       return
 
-    first_diag = diags[ 0 ]
-    text = first_diag[ 'text' ]
-    if first_diag.get( 'fixit_available', False ):
-      text += ' (FixIt)'
+    if ( vimsupport.VimSupportsVirtualText() and
+         self._user_options[ 'echo_current_diagnostic' ] == 'virtual-text' ):
+      tp.ClearTextProperties( self._bufnr,
+                              prop_types = [ 'YcmVirtDiagPadding',
+                                             'YcmVirtDiagError',
+                                             'YcmVirtDiagWarning' ] )
+    else:
+      if not will_be_replaced:
+        vimsupport.PostVimMessage( '', warning = False )
 
-    vimsupport.PostVimMessage( text, warning = False, truncate = True )
+    self._diag_message_needs_clearing = False
+
+
+  def _EchoDiagnosticText( self, line_num, first_diag, text ):
+    self._ClearCurrentDiagnostic( bool( text ) )
+
+    if ( vimsupport.VimSupportsVirtualText() and
+         self._user_options[ 'echo_current_diagnostic' ] == 'virtual-text' ):
+      if not text:
+        return
+
+      def MakeVritualTextProperty( prop_type, text, position='after' ):
+        vimsupport.AddTextProperty( self._bufnr,
+                                    line_num,
+                                    0,
+                                    prop_type,
+                                    {
+                                      'text': text,
+                                      'text_align': position,
+                                      'text_wrap': 'wrap'
+                                    } )
+
+      if vim.options[ 'ambiwidth' ] != 'double':
+        marker = '⚠'
+      else:
+        marker = '>'
+
+      MakeVritualTextProperty(
+        'YcmVirtDiagPadding',
+        ' ' * vim.buffers[ self._bufnr ].options[ 'shiftwidth' ] ),
+      MakeVritualTextProperty(
+        'YcmVirtDiagError' if _DiagnosticIsError( first_diag )
+                       else 'YcmVirtDiagWarning',
+        marker + ' ' + [ line for line in text.splitlines() if line ][ 0 ] )
+    else:
+      if not text:
+        # We already cleared it
+        return
+
+      vimsupport.PostVimMessage( text, warning = False, truncate = True )
+
     self._diag_message_needs_clearing = True
 
 
   def _DiagnosticsCount( self, predicate ):
     count = 0
-    for diags in itervalues( self._line_to_diags ):
+    for diags in self._line_to_diags.values():
       count += sum( 1 for d in diags if predicate( d ) )
     return count
 
 
-  def _UpdateLocationList( self ):
-    vimsupport.SetLocationListForBuffer(
+  def _UpdateLocationLists( self, open_on_edit = False ):
+    vimsupport.SetLocationListsForBuffer(
       self._bufnr,
-      vimsupport.ConvertDiagnosticsToQfList( self._diagnostics ) )
+      vimsupport.ConvertDiagnosticsToQfList( self._diagnostics ),
+      open_on_edit )
+
+
+  def _ClearMatches( self ):
+    props_to_remove = vimsupport.GetTextProperties( self._bufnr )
+    for prop in props_to_remove:
+      vimsupport.RemoveDiagnosticProperty( self._bufnr, prop )
 
 
   def UpdateMatches( self ):
     if not self._user_options[ 'enable_diagnostic_highlighting' ]:
       return
 
-    matches_to_remove = vimsupport.GetDiagnosticMatchesInCurrentWindow()
-
-    for diags in itervalues( self._line_to_diags ):
+    props_to_remove = vimsupport.GetTextProperties( self._bufnr )
+    for diags in self._line_to_diags.values():
       # Insert squiggles in reverse order so that errors overlap warnings.
       for diag in reversed( diags ):
-        patterns = []
+        for line, column, name, extras in _ConvertDiagnosticToTextProperties(
+            self._bufnr,
+            diag ):
+          global YCM_VIM_PROPERTY_ID
 
-        group = ( 'YcmErrorSection' if _DiagnosticIsError( diag ) else
-                  'YcmWarningSection' )
-
-        location_extent = diag[ 'location_extent' ]
-        if location_extent[ 'start' ][ 'line_num' ] <= 0:
-          location = diag[ 'location' ]
-          patterns.append( vimsupport.GetDiagnosticMatchPattern(
-            location[ 'line_num' ],
-            location[ 'column_num' ] ) )
-        else:
-          patterns.append( vimsupport.GetDiagnosticMatchPattern(
-            location_extent[ 'start' ][ 'line_num' ],
-            location_extent[ 'start' ][ 'column_num' ],
-            location_extent[ 'end' ][ 'line_num' ],
-            location_extent[ 'end' ][ 'column_num' ] ) )
-
-        for diag_range in diag[ 'ranges' ]:
-          patterns.append( vimsupport.GetDiagnosticMatchPattern(
-            diag_range[ 'start' ][ 'line_num' ],
-            diag_range[ 'start' ][ 'column_num' ],
-            diag_range[ 'end' ][ 'line_num' ],
-            diag_range[ 'end' ][ 'column_num' ] ) )
-
-        for pattern in patterns:
-          # The id doesn't matter for matches that we may add.
-          match = vimsupport.DiagnosticMatch( 0, group, pattern )
+          # Note the following .remove() works because the __eq__ on
+          # DiagnosticProperty does not actually check the IDs match...
+          diag_prop = vimsupport.DiagnosticProperty(
+              YCM_VIM_PROPERTY_ID,
+              name,
+              line,
+              column,
+              extras[ 'end_col' ] - column if 'end_col' in extras else column )
           try:
-            matches_to_remove.remove( match )
+            props_to_remove.remove( diag_prop )
           except ValueError:
-            vimsupport.AddDiagnosticMatch( match )
+            extras.update( {
+              'id': YCM_VIM_PROPERTY_ID
+            } )
+            vimsupport.AddTextProperty( self._bufnr,
+                                        line,
+                                        column,
+                                        name,
+                                        extras )
+          YCM_VIM_PROPERTY_ID += 1
+    for prop in props_to_remove:
+      vimsupport.RemoveDiagnosticProperty( self._bufnr, prop )
 
-    for match in matches_to_remove:
-      vimsupport.RemoveDiagnosticMatch( match )
+
+  def _ClearSigns( self ):
+    signs_to_unplace = vimsupport.GetSignsInBuffer( self._bufnr )
+    vim.eval( f'sign_unplacelist( { signs_to_unplace } )' )
 
 
   def _UpdateSigns( self ):
     signs_to_unplace = vimsupport.GetSignsInBuffer( self._bufnr )
-
-    for line, diags in iteritems( self._line_to_diags ):
+    signs_to_place = []
+    for line, diags in self._line_to_diags.items():
       if not diags:
         continue
 
@@ -182,15 +261,18 @@ class DiagnosticInterface( object ):
       # are sorted by errors in priority and Vim can only display one sign by
       # line.
       name = 'YcmError' if _DiagnosticIsError( diags[ 0 ] ) else 'YcmWarning'
-      sign = vimsupport.CreateSign( line, name, self._bufnr )
-
+      sign = {
+          'lnum': line,
+          'name': name,
+          'buffer': self._bufnr,
+          'group': 'ycm_signs'
+      }
       try:
         signs_to_unplace.remove( sign )
       except ValueError:
-        vimsupport.PlaceSign( sign )
-
-    for sign in signs_to_unplace:
-      vimsupport.UnplaceSign( sign )
+        signs_to_place.append( sign )
+    vim.eval( f'sign_placelist( { signs_to_place } )' )
+    vim.eval( f'sign_unplacelist( { signs_to_unplace } )' )
 
 
   def _ConvertDiagListToDict( self ):
@@ -202,7 +284,7 @@ class DiagnosticInterface( object ):
         line_number = location[ 'line_num' ]
         self._line_to_diags[ line_number ].append( diag )
 
-    for diags in itervalues( self._line_to_diags ):
+    for diags in self._line_to_diags.values():
       # We also want errors to be listed before warnings so that errors aren't
       # hidden by the warnings; Vim won't place a sign over an existing one.
       diags.sort( key = lambda diag: ( diag[ 'kind' ],
@@ -221,3 +303,83 @@ def _NormalizeDiagnostic( diag ):
   location[ 'column_num' ] = ClampToOne( location[ 'column_num' ] )
   location[ 'line_num' ] = ClampToOne( location[ 'line_num' ] )
   return diag
+
+
+def _ConvertDiagnosticToTextProperties( bufnr, diagnostic ):
+  properties = []
+
+  name = ( 'YcmErrorProperty' if _DiagnosticIsError( diagnostic ) else
+            'YcmWarningProperty' )
+  if vimsupport.VimIsNeovim():
+    name = name.replace( 'Property', 'Section' )
+
+  location_extent = diagnostic[ 'location_extent' ]
+  if location_extent[ 'start' ][ 'line_num' ] <= 0:
+    location = diagnostic[ 'location' ]
+    line, column = vimsupport.LineAndColumnNumbersClamped(
+      bufnr,
+      location[ 'line_num' ],
+      location[ 'column_num' ]
+    )
+    properties.append( ( line, column, name, {} ) )
+  else:
+    start_line, start_column = vimsupport.LineAndColumnNumbersClamped(
+      bufnr,
+      location_extent[ 'start' ][ 'line_num' ],
+      location_extent[ 'start' ][ 'column_num' ]
+    )
+    end_line, end_column = vimsupport.LineAndColumnNumbersClamped(
+      bufnr,
+      location_extent[ 'end' ][ 'line_num' ],
+      location_extent[ 'end' ][ 'column_num' ]
+    )
+    properties.append( (
+      start_line,
+      start_column,
+      name,
+      { 'end_lnum': end_line,
+        'end_col': end_column } ) )
+
+  for diagnostic_range in diagnostic[ 'ranges' ]:
+    if ( diagnostic_range[ 'start' ][ 'line_num' ] == 0 or
+         diagnostic_range[ 'end' ][ 'line_num' ] == 0 ):
+      continue
+    start_line, start_column = vimsupport.LineAndColumnNumbersClamped(
+      bufnr,
+      diagnostic_range[ 'start' ][ 'line_num' ],
+      diagnostic_range[ 'start' ][ 'column_num' ]
+    )
+    end_line, end_column = vimsupport.LineAndColumnNumbersClamped(
+      bufnr,
+      diagnostic_range[ 'end' ][ 'line_num' ],
+      diagnostic_range[ 'end' ][ 'column_num' ]
+    )
+
+    if not _IsValidRange( start_line, start_column, end_line, end_column ):
+      continue
+
+    properties.append( (
+      start_line,
+      start_column,
+      name,
+      { 'end_lnum': end_line,
+        'end_col': end_column } ) )
+
+  return properties
+
+
+def _IsValidRange( start_line, start_column, end_line, end_column ):
+  # End line before start line - invalid
+  if start_line > end_line:
+    return False
+
+  # End line after start line - valid
+  if start_line < end_line:
+    return True
+
+  # Same line, start colum after end column - invalid
+  if start_column > end_column:
+    return False
+
+  # Same line, start column before or equal to end column - valid
+  return True

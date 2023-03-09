@@ -15,24 +15,22 @@
 # You should have received a copy of the GNU General Public License
 # along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import unicode_literals
-from __future__ import print_function
-from __future__ import division
-from __future__ import absolute_import
-# Not installing aliases from python-future; it's unreliable and slow.
-from builtins import *  # noqa
-
 import logging
 import json
 import vim
-from future.utils import native
 from base64 import b64decode, b64encode
+from hmac import compare_digest
+from urllib.parse import urljoin, urlparse, urlencode
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 from ycm import vimsupport
-from ycmd.utils import ToBytes, urljoin, urlparse, GetCurrentDirectory
-from ycmd.hmac_utils import CreateRequestHmac, CreateHmac, SecureBytesEqual
+from ycmd.utils import ToBytes, GetCurrentDirectory, ToUnicode
+from ycmd.hmac_utils import CreateRequestHmac, CreateHmac
 from ycmd.responses import ServerError, UnknownExtraConf
 
-_HEADERS = {'content-type': 'application/json'}
+HTTP_SERVER_ERROR = 500
+
+_HEADERS = { 'content-type': 'application/json' }
 _CONNECT_TIMEOUT_SEC = 0.01
 # Setting this to None seems to screw up the Requests/urllib3 libs.
 _READ_TIMEOUT_SEC = 30
@@ -40,7 +38,7 @@ _HMAC_HEADER = 'x-ycm-hmac'
 _logger = logging.getLogger( __name__ )
 
 
-class BaseRequest( object ):
+class BaseRequest:
 
   def __init__( self ):
     self._should_resend = False
@@ -83,11 +81,12 @@ class BaseRequest( object ):
         else:
           _IgnoreExtraConfFile( e.extra_conf_file )
         self._should_resend = True
-    except BaseRequest.Requests().exceptions.ConnectionError:
+    except URLError as e:
       # We don't display this exception to the user since it is likely to happen
       # for each subsequent request (typically if the server crashed) and we
       # don't want to spam the user with it.
-      _logger.exception( 'Unable to connect to server' )
+      _logger.error( e )
+
     except Exception as e:
       _logger.exception( 'Error while handling server response' )
       if display_message:
@@ -105,11 +104,20 @@ class BaseRequest( object ):
                           handler,
                           timeout = _READ_TIMEOUT_SEC,
                           display_message = True,
-                          truncate_message = False ):
+                          truncate_message = False,
+                          payload = None ):
     return self.HandleFuture(
-        BaseRequest._TalkToHandlerAsync( '', handler, 'GET', timeout ),
+        self.GetDataFromHandlerAsync( handler, timeout, payload ),
         display_message,
         truncate_message )
+
+
+  def GetDataFromHandlerAsync( self,
+                               handler,
+                               timeout = _READ_TIMEOUT_SEC,
+                               payload = None ):
+    return BaseRequest._TalkToHandlerAsync(
+        '', handler, 'GET', timeout, payload )
 
 
   # This is the blocking version of the method. See below for async.
@@ -145,21 +153,39 @@ class BaseRequest( object ):
   def _TalkToHandlerAsync( data,
                            handler,
                            method,
-                           timeout = _READ_TIMEOUT_SEC ):
-    request_uri = _BuildUri( handler )
-    if method == 'POST':
-      sent_data = _ToUtf8Json( data )
-      return BaseRequest.Session().post(
-          request_uri,
-          data = sent_data,
-          headers = BaseRequest._ExtraHeaders( method,
-                                               request_uri,
-                                               sent_data ),
-          timeout = ( _CONNECT_TIMEOUT_SEC, timeout ) )
-    return BaseRequest.Session().get(
-        request_uri,
-        headers = BaseRequest._ExtraHeaders( method, request_uri ),
-        timeout = ( _CONNECT_TIMEOUT_SEC, timeout ) )
+                           timeout = _READ_TIMEOUT_SEC,
+                           payload = None ):
+    def _MakeRequest( data, handler, method, timeout, payload ):
+      request_uri = _BuildUri( handler )
+
+      if method == 'POST':
+        sent_data = _ToUtf8Json( data )
+        headers = BaseRequest._ExtraHeaders( method,
+                                             request_uri,
+                                             sent_data )
+        _logger.debug( 'POST %s\n%s\n%s', request_uri, headers, sent_data )
+      else:
+        headers = BaseRequest._ExtraHeaders( method, request_uri )
+        if payload:
+          request_uri += ToBytes( f'?{urlencode( payload )}' )
+
+        _logger.debug( 'GET %s (%s)\n%s', request_uri, payload, headers )
+      return urlopen(
+        Request(
+          ToUnicode( request_uri ),
+          data = sent_data if data else None,
+          headers = headers,
+          method = method ),
+        timeout = max( _CONNECT_TIMEOUT_SEC, timeout ) )
+
+
+    return BaseRequest.Executor().submit(
+      _MakeRequest,
+      data,
+      handler,
+      method,
+      timeout,
+      payload )
 
 
   @staticmethod
@@ -175,28 +201,16 @@ class BaseRequest( object ):
     return headers
 
 
-  # These two methods exist to avoid importing the requests module at startup;
+  # This method exists to avoid importing the requests module at startup;
   # reducing loading time since this module is slow to import.
   @classmethod
-  def Requests( cls ):
+  def Executor( cls ):
     try:
-      return cls.requests
-    except AttributeError:
-      import requests
-      cls.requests = requests
-      return requests
-
-
-  @classmethod
-  def Session( cls ):
-    try:
-      return cls.session
+      return cls.executor
     except AttributeError:
       from ycm.unsafe_thread_pool_executor import UnsafeThreadPoolExecutor
-      from requests_futures.sessions import FuturesSession
-      executor = UnsafeThreadPoolExecutor( max_workers = 30 )
-      cls.session = FuturesSession( executor = executor )
-      return cls.session
+      cls.executor = UnsafeThreadPoolExecutor( max_workers = 30 )
+      return cls.executor
 
 
   server_location = ''
@@ -236,18 +250,24 @@ def BuildRequestData( buffer_number = None ):
 
 
 def _JsonFromFuture( future ):
-  response = future.result()
-  _ValidateResponseObject( response )
-  if response.status_code == BaseRequest.Requests().codes.server_error:
-    raise MakeServerException( response.json() )
+  try:
+    response = future.result()
+    response_text = response.read()
+    _ValidateResponseObject( response, response_text )
+    response.close()
 
-  # We let Requests handle the other status types, we only handle the 500
-  # error code.
-  response.raise_for_status()
-
-  if response.text:
-    return response.json()
-  return None
+    if response_text:
+      return json.loads( response_text )
+    return None
+  except HTTPError as response:
+    if response.code == HTTP_SERVER_ERROR:
+      response_text = response.read()
+      response.close()
+      if response_text:
+        raise MakeServerException( json.loads( response_text ) )
+      else:
+        return None
+    raise
 
 
 def _LoadExtraConfFile( filepath ):
@@ -274,21 +294,22 @@ def _ToUtf8Json( data ):
   return ToBytes( json.dumps( data ) if data else None )
 
 
-def _ValidateResponseObject( response ):
-  our_hmac = CreateHmac( response.content, BaseRequest.hmac_secret )
+def _ValidateResponseObject( response, response_text ):
+  if not response_text:
+    return
+  our_hmac = CreateHmac( response_text, BaseRequest.hmac_secret )
   their_hmac = ToBytes( b64decode( response.headers[ _HMAC_HEADER ] ) )
-  if not SecureBytesEqual( our_hmac, their_hmac ):
+  if not compare_digest( our_hmac, their_hmac ):
     raise RuntimeError( 'Received invalid HMAC for response!' )
-  return True
 
 
 def _BuildUri( handler ):
-  return native( ToBytes( urljoin( BaseRequest.server_location, handler ) ) )
+  return ToBytes( urljoin( BaseRequest.server_location, handler ) )
 
 
 def MakeServerException( data ):
   if data[ 'exception' ][ 'TYPE' ] == UnknownExtraConf.__name__:
     return UnknownExtraConf( data[ 'exception' ][ 'extra_conf_file' ] )
 
-  return ServerError( '{0}: {1}'.format( data[ 'exception' ][ 'TYPE' ],
-                                         data[ 'message' ] ) )
+  return ServerError( f'{ data[ "exception" ][ "TYPE" ] }: '
+                      f'{ data[ "message" ] }' )
