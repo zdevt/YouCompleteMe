@@ -44,7 +44,6 @@ Contents
     - [macOS](#macos)
     - [Linux 64-bit](#linux-64-bit)
     - [Windows](#windows)
-    - [FreeBSD/OpenBSD](#freebsdopenbsd)
     - [Full Installation Guide](#full-installation-guide)
 - [Quick Feature Summary](#quick-feature-summary)
 - [User Guide](#user-guide)
@@ -392,7 +391,7 @@ The following additional language support options are available:
   and add `--cs-completer` when calling `install.py`.
 - Go support: install [Go][go-install] and add `--go-completer` when calling
   `install.py`.
-- JavaScript and TypeScript support: install [Node.js and npm][npm-install] and
+- JavaScript and TypeScript support: install [Node.js 18+ and npm][npm-install] and
   add `--ts-completer` when calling `install.py`.
 - Rust support: add `--rust-completer` when calling `install.py`.
 - Java support: install [JDK 17][jdk-install] and add
@@ -432,6 +431,9 @@ apt install build-essential cmake vim-nox python3-dev
 - Install mono-complete, go, node, java and npm
 
 ```
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_current.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
 apt install mono-complete golang nodejs openjdk-17-jdk openjdk-17-jre npm
 ```
 
@@ -500,7 +502,7 @@ The following additional language support options are available:
   when calling `install.py`.
 - Go support: install [Go][go-install] and add `--go-completer` when calling
   `install.py`.
-- JavaScript and TypeScript support: install [Node.js and npm][npm-install] and
+- JavaScript and TypeScript support: install [Node.js 18+ and npm][npm-install] and
   add `--ts-completer` when calling `install.py`.
 - Rust support: add `--rust-completer` when calling `install.py`.
 - Java support: install [JDK 17][jdk-install] and add
@@ -614,7 +616,7 @@ The following additional language support options are available:
   Be sure that [the build utility `msbuild` is in your PATH][add-msbuild-to-path].
 - Go support: install [Go][go-install] and add `--go-completer` when calling
   `install.py`.
-- JavaScript and TypeScript support: install [Node.js and npm][npm-install] and
+- JavaScript and TypeScript support: install [Node.js 18+ and npm][npm-install] and
   add `--ts-completer` when calling `install.py`.
 - Rust support: add `--rust-completer` when calling `install.py`.
 - Java support: install [JDK 17][jdk-install] and add
@@ -632,102 +634,6 @@ python install.py --all
 You can specify the Microsoft Visual C++ (MSVC) version using the `--msvc`
 option. YCM officially supports MSVC 15 (2017), MSVC 16 (Visual Studio 2019) 
 and MSVC 17 (Visual Studio 17 2022).
-
-That's it. You're done. Refer to the _User Guide_ section on how to use YCM.
-Don't forget that if you want the C-family semantic completion engine to work,
-you will need to provide the compilation flags for your project to YCM. It's all
-in the User Guide.
-
-YCM comes with sane defaults for its options, but you still may want to take a
-look at what's available for configuration. There are a few interesting options
-that are conservatively turned off by default that you may want to turn on.
-
-### FreeBSD/OpenBSD
-
-#### Quick start, installing all completers
-
-- Install YCM plugin via [Vundle][]
-- Install CMake
-
-```
-pkg install cmake
-```
-
-- Install xbuild, go, node and npm
-- Compile YCM
-
-```
-cd ~/.vim/bundle/YouCompleteMe
-python3 install.py --all
-```
-
-- For plugging an arbitrary LSP server, check [the relevant section](#plugging-an-arbitrary-lsp-server)
-
-#### Explanation for the quick start
-
-These instructions (using `install.py`) are the quickest way to install
-YouCompleteMe, however they may not work for everyone. If the following
-instructions don't work for you, check out the [full installation
-guide](#full-installation-guide).
-
-**NOTE:** OpenBSD / FreeBSD are not officially supported platforms by YCM.
-
-Make sure you have a supported Vim version with Python 3 support, and a supported
-compiler and CMake, perhaps:
-
-```
-pkg install cmake
-```
-
-Install YouCompleteMe with [Vundle][].
-
-**Remember:** YCM is a plugin with a compiled component. If you **update** YCM
-using Vundle and the `ycm_core` library APIs have changed (happens
-rarely), YCM will notify you to recompile it. You should then rerun the install
-process.
-
-Compiling YCM **with** semantic support for C-family languages through
-**clangd**:
-
-```
-cd ~/.vim/bundle/YouCompleteMe
-./install.py --clangd-completer
-```
-
-Compiling YCM **without** semantic support for C-family languages:
-
-```
-cd ~/.vim/bundle/YouCompleteMe
-./install.py
-```
-
-If the `python` executable is not present, or the default `python` is not the
-one that should be compiled against, specify the python interpreter explicitly:
-
-```
-python3 install.py --clangd-completer
-```
-
-The following additional language support options are available:
-
-- C# support: install Mono and add `--cs-completer` when calling
-  `./install.py`.
-- Go support: install [Go][go-install] and add `--go-completer` when calling
-  `./install.py`.
-- JavaScript and TypeScript support: install [Node.js and npm][npm-install] and
-  add `--ts-completer` when calling `install.py`.
-- Rust support: add `--rust-completer` when calling `./install.py`.
-- Java support: install [JDK 17][jdk-install] and add
-  `--java-completer` when calling `./install.py`.
-
-To simply compile with everything enabled, there's a `--all` flag. So, to
-install with all language features, ensure `xbuild`, `go`, `node` and `npm`
-tools are installed and in your `PATH`, then simply run:
-
-```
-cd ~/.vim/bundle/YouCompleteMe
-./install.py --all
-```
 
 That's it. You're done. Refer to the _User Guide_ section on how to use YCM.
 Don't forget that if you want the C-family semantic completion engine to work,
@@ -986,7 +892,8 @@ Signature help is triggered in insert mode automatically when
 `g:ycm_auto_trigger` is enabled and is not supported when it is not enabled.
 
 The signatures popup is hidden when there are no matching signatures or when you
-leave insert mode. There is no key binding to clear the popup.
+leave insert mode. If you want to manually control when it is visible, you can
+map something to `<plug>YCMToggleSignatureHelp` (see below).
 
 For more details on this feature and a few demos, check out the
 [PR that proposed it][signature-help-pr].
@@ -1181,7 +1088,7 @@ On supported architectures, the `install.py` script will download a suitable
 clangd (`--clangd-completer`) or libclang (`--clang-completer`) for you.
 Supported architectures are:
 
-* Linux glibc >= 2.27 (Intel, armv7-a, aarch64) - built on ubuntu 18.04
+* Linux glibc >= 2.31 (Intel, armv7-a, aarch64) - built on ubuntu 20.04
 * MacOS >=10.15 (Intel, arm64)
   - For Intel, compatibility per clang.llvm.org downloads
   - For arm64, macOS 10.15+
@@ -1207,7 +1114,7 @@ $ EXTRA_CMAKE_ARGS='-DPATH_TO_LLVM_ROOT=/path/to/your/llvm' ./install.py --clang
 ```
 
 Please note that if using custom `clangd` or `libclang` it _must_ match the
-version that YCM requires. Currently YCM requires ***clang 15.0.1***.
+version that YCM requires. Currently YCM requires ***clang 17.0.1***.
 
 #### Compile flags
 
@@ -1623,8 +1530,19 @@ built YCM with the `--go-completer` flag; see the [*Installation*
 section](#installation) for details). The server only works for projects with
 the "canonical" layout.
 
-`gopls` also has a handful of undocumented options for which the
-[source code][gopls-preferences] is the only reference.
+`gopls` also has a load of [documented options](https://github.com/golang/tools/blob/master/gopls/doc/settings.md).
+
+You can set these in your `.ycm_extra_conf.py`. For example, to set the build tags:
+
+```python
+def Settings( **kwargs ):
+  if kwargs[ 'language' ] == 'go':
+    return {
+       'ls': {
+         'build.buildFlags': [ '-tags=debug' ] }
+       }
+    }
+```
 
 ### JavaScript and TypeScript Semantic Completion
 
@@ -1640,7 +1558,7 @@ available on [the wiki][tern-instructions].
 
 All JavaScript and TypeScript features are provided by the [TSServer][] engine,
 which is included in the TypeScript SDK. To enable these features, install
-[Node.js and npm][npm-install] and call the `install.py` script with the
+[Node.js 18+ and npm][npm-install] and call the `install.py` script with the
 `--ts-completer` flag.
 
 [TSServer][] relies on [the `jsconfig.json` file][jsconfig.json] for JavaScript
@@ -1866,6 +1784,10 @@ You can also style the line that has the warning/error with these groups:
 - `YcmWarningLine`, which falls back to group `SyntasticWarningLine` if it
   exists
 
+Finally, you can also style the popup for the detailed diagnostics (it is shown
+if `g:ycm_show_detailed_diag_in_popup` is set) using the group `YcmErrorPopup`,
+which falls back to `ErrorMsg`.
+
 Note that the line highlighting groups only work when the
 [`g:ycm_enable_diagnostic_signs`](#the-gycm_enable_diagnostic_signs-option)
 option is set. If you want highlighted lines but no signs in the Vim gutter,
@@ -2027,6 +1949,11 @@ call for the current completer.
 See the [file type feature summary](#quick-feature-summary) for an overview of
 the features available for each file type. See the _YcmCompleter subcommands_
 section for more information on the available subcommands and their usage.
+
+Some commands, like `Format` accept a range, like `:%YcmCompleter Format`.
+
+Some commands like `GetDoc` and the various `GoTo` commands respect modifiers,
+like `:rightbelow YcmCompleter GetDoc`, `:vertical YcmCompleter GoTo`.
 
 YcmCompleter Subcommands
 ------------------------
@@ -2243,6 +2170,27 @@ under the cursor. Depending on the file type, this includes things like:
 * Doxygen/javadoc comments,
 * Python docstrings,
 * etc.
+
+The documentation is opened in the preview window, and options like
+`previewheight` are respected. If you would like to customise the height and
+position of this window, we suggest a custom command that:
+
+* Sets `previewheight` temporarily
+* Runs the `GetDoc` command with supplied modifiers
+* Restores `previewheight`.
+
+For example:
+
+```viml
+command -count ShowDocWithSize
+  \ let g:ph=&previewheight 
+  \ <bar> set previewheight=<count>
+  \ <bar> <mods> YcmCompleter GetDoc
+  \ <bar> let &previewheight=g:ph
+```
+
+You can then use something like `:botright vertical 80ShowDocWithSize`. Here's an
+example of that: https://asciinema.org/a/hE6Pi1gU6omBShwFna8iwGEe9
 
 Supported in filetypes: `c, cpp, objc, objcpp, cuda, cs, go, java, javascript,
 python, typescript, rust`
@@ -3019,6 +2967,7 @@ buffer-local variable can be set to a dictionary with the following keys:
 * `command`: The YCM completer subcommand which should be run on hover
 * `syntax`: The syntax to use (as in `set syntax=`) in the popup window for
   highlighting.
+* `popup_params`: The params passed to a popup window which gets opened.
 
 For example, to use C/C++ syntax highlighting in the popup for C-family
 languages, add something like this to your vimrc:
@@ -3032,6 +2981,25 @@ augroup MyYCMCustom
     \ }
 augroup END
 ```
+
+You can also modify the opened popup with `popup_params` key.
+For example, you can limit the popup's maximum width and add a border to it:
+
+```viml
+augroup MyYCMCustom
+  autocmd!
+  autocmd FileType c,cpp let b:ycm_hover = {
+    \ 'command': 'GetDoc',
+    \ 'syntax': &filetype
+    \ 'popup_params': {
+    \     'maxwidth': 80,
+    \     'border': [],
+    \     'borderchars': ['─', '│', '─', '│', '┌', '┐', '┘', '└'],
+    \   },
+    \ }
+augroup END
+```
+See `:help popup_create-arguments` for the list of available popup window options.
 
 Default: `'CursorHold'`
 
@@ -3766,6 +3734,19 @@ Default: `0`
 let g:ycm_disable_signature_help = 1
 ```
 
+### The `g:ycm_signature_help_disable_syntax` option
+
+Set this to 1 to disable syntax highlighting in the signature help popup. Thiis
+can help if your colourscheme doesn't work well with the default highliting and
+inverse video.
+
+Default: `0`
+
+```viml
+" Disable signature help syntax highliting
+let g:ycm_signature_help_disable_syntax = 1
+```
+
 ### The `g:ycm_gopls_binary_path` option
 
 In case the system-wide `gopls` binary is newer than the bundled one, setting
@@ -3874,7 +3855,7 @@ Sponsorship
 
 If you like YCM so much that you're wiling to part with your hard-earned cash, please consider donating to one of the following charities, which are meaningful to the current maintainers (in no particular order):
 
-* [Greyhound Rescue Wales](https://greyhoundrescuewales.co.uk)
+* [Hector's Greyhound Rescue](https://www.hectorsgreyhoundrescue.org)
 * [Be Humane](https://www.budihuman.rs/en)
 * [Cancer Research UK](https://www.cancerresearchuk.org)
 * [ICCF Holland](https://iccf.nl)
