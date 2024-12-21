@@ -78,15 +78,14 @@ def YouCompleteMe_UpdateDiagnosticInterface( ycm, post_vim_message, *args ):
       'line_num': 2,
       'column_num': 31
     },
-    # Looks strange but this is really what ycmd is returning.
     'location_extent': {
       'start': {
-        'filepath': '',
+        'filepath': 'buffer',
         'line_num': 2,
         'column_num': 31,
       },
       'end': {
-        'filepath': '',
+        'filepath': 'buffer',
         'line_num': 2,
         'column_num': 32,
       }
@@ -624,6 +623,18 @@ class YouCompleteMeTest( TestCase ):
         'filepath': 'buffer',
         'line_num': 19,
         'column_num': 2
+      },
+      'location_extent': {
+        'start': {
+          'filepath': 'buffer',
+          'line_num': 19,
+          'column_num': 2
+        },
+        'end': {
+          'filepath': 'buffer',
+          'line_num': 19,
+          'column_num': 3
+        }
       }
     }
 
@@ -673,6 +684,18 @@ class YouCompleteMeTest( TestCase ):
         'filepath': 'buffer',
         'line_num': 19,
         'column_num': 2
+      },
+      'location_extent': {
+        'start': {
+          'filepath': 'buffer',
+          'line_num': 19,
+          'column_num': 2
+        },
+        'end': {
+          'filepath': 'buffer',
+          'line_num': 19,
+          'column_num': 2
+        }
       }
     }
 
@@ -739,7 +762,7 @@ class YouCompleteMeTest( TestCase ):
     test_utils.VIM_PROPS_FOR_BUFFER[ current_buffer.number ] = [
       VimProp( 'YcmWarningProperty', 3, 5, 3, 7 ),
       VimProp( 'YcmWarningProperty', 3, 3, 3, 9 ),
-      VimProp( 'YcmErrorProperty', 3, 8 )
+      VimProp( 'YcmErrorProperty', 3, 8, 3, 9 )
     ]
 
     with MockVimBuffers( [ current_buffer ], [ current_buffer ] ):
